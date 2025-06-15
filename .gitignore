@@ -16,3 +16,8 @@ wheels/
 
 /tmp/
 /prototypes/
+ainc/char.json
+.python-version
+.gitignore
+ainc/hdc_brain.pkl
+ainc/chat.json
