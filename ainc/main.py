@@ -269,7 +269,6 @@ while True:
         }
 
         if query_plan and "queries" in query_plan:
-            # Always ensure the main character and user are included in mood checks
             all_chars_to_check = set(query_plan.get("characters_in_scene", []))
             all_chars_to_check.add(char_name)
             all_chars_to_check.add(user_name)
@@ -339,7 +338,6 @@ while True:
             chat_log.append({'who': chatter_agent.character_name, 'message': response_text})
             event_info = {'description': response_text, 'dsl': parsed_ai_event['dsl']}
             if parsed_ai_event.get('mood_info'):
-                # Ensure speaker name is correct
                 parsed_ai_event['mood_info']['target'] = char_name
                 event_info['meta'] = {'mood_impact_info': parsed_ai_event['mood_info']}
             hdc_brain.process_dsl_event(event_info)

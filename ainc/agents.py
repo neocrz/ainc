@@ -1,13 +1,9 @@
-# agents.py
-
-import json  # <-- THE FIX IS HERE
+import json
 import re
 from google import genai
 from google.genai import types
 from prompts import OBSERVER_AGENT_PROMPT, CHATTER_AGENT_PROMPT, ORCHESTRATOR_AGENT_PROMPT
 from utils import print_header
-
-# --- AI-Powered Agents ---
 
 class ObserverAgent:
     def __init__(self, api_key):
@@ -136,7 +132,6 @@ class OnboardingAgent:
                 self.hdc.process_dsl_event(event_info)
         print(f"-> {char_name}'s core memories have been seeded.")
 
-# --- The New Orchestrator Agent ---
 class OrchestratorAgent:
     def __init__(self, api_key):
         self.client = genai.Client(api_key=api_key)
