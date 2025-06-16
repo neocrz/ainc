@@ -1,28 +1,21 @@
 # agents.py
 
+import json  # <-- THE FIX IS HERE
 import re
 from google import genai
 from google.genai import types
-from prompts import OBSERVER_AGENT_PROMPT, CHATTER_AGENT_PROMPT
+from prompts import OBSERVER_AGENT_PROMPT, CHATTER_AGENT_PROMPT, ORCHESTRATOR_AGENT_PROMPT
 from utils import print_header
 
-
+# --- AI-Powered Agents ---
 
 class ObserverAgent:
-    """
-    An upgraded agent that parses messages into a dictionary containing
-    both the structured DSL and optional mood information.
-    """
     def __init__(self, api_key):
         self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-1.5-flash-latest"
+        self.model_name = "gemini-2.0-flash-lite"
         self.system_instruction = OBSERVER_AGENT_PROMPT
 
     def parse_message(self, message):
-        """
-        Parses a message into a dictionary.
-        Returns: {'dsl': str, 'mood_info': dict_or_none} on success, or None on failure.
-        """
         print(f"\n>> ObserverAgent received: '{message}'")
         print(">> Calling Gemini API to parse...")
         try:
@@ -34,44 +27,30 @@ class ObserverAgent:
                     max_output_tokens=250, temperature=0.1
                 )
             )
-
             hdc_match = re.search(r"<HDC>(.*?)</HDC>", response.text, re.DOTALL)
-            # Regex to capture speaker, mood, and now intensity from the MOOD tag
             mood_match = re.search(r'<MOOD\s+speaker="([^"]+)"\s+mood="([^"]+)"\s+intensity="([^"]+)">', response.text)
-
             if not hdc_match:
                 print(f">> Gemini parsing FAILED. No <HDC> tag found in response: {response.text}")
                 return None
-
             dsl_string = hdc_match.group(1).strip()
             print(f">> Gemini parsed successfully: {dsl_string}")
-
-            # This is the new dictionary structure we return
             result = {'dsl': dsl_string, 'mood_info': None}
-
             if mood_match:
-                speaker = mood_match.group(1).strip().lower() # Standardize name to lowercase
+                speaker = mood_match.group(1).strip().lower()
                 mood = mood_match.group(2).strip().lower()
-                try:
-                    intensity = float(mood_match.group(3).strip())
-                except ValueError:
-                    intensity = 1.0 # Default intensity if parsing fails
-                
-                # The 'target' key is what the HDC mood system expects
+                try: intensity = float(mood_match.group(3).strip())
+                except ValueError: intensity = 1.0
                 result['mood_info'] = {'target': speaker, 'mood': mood, 'intensity': intensity}
                 print(f">> Gemini detected mood: {speaker.capitalize()} is feeling {mood} (Intensity: {intensity})")
-
-            return result # <-- CRITICAL FIX: Return the dictionary
-
+            return result
         except Exception as e:
             print(f"!! An error occurred while calling Gemini API: {e}")
             return None
 
 class ChatterAgent:
-    # ... (This class is unchanged and correct) ...
     def __init__(self, api_key, character_name="Kai"):
         self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-1.5-flash-latest"
+        self.model_name = "gemini-2.0-flash-lite"
         self.system_instruction = CHATTER_AGENT_PROMPT.replace("Kai", character_name)
         self.character_name = character_name
     def generate_response(self, user_message, context_briefing):
@@ -92,51 +71,34 @@ class ChatterAgent:
             print(f"!! An error occurred while calling Gemini API: {e}")
             return f"({self.character_name} seems lost in thought and doesn't respond.)"
 
+# --- HDC Querying Agents ---
+
 class MoodAgent:
-    """
-    A specialized agent to query the emotional state of characters,
-    distinguishing between immediate reactions and dominant disposition.
-    """
     def __init__(self, hdc_system):
         self.hdc = hdc_system
 
     def _find_best_match(self, query_hv):
-        """Helper function to find the best mood in the vocabulary for a given vector."""
-        if query_hv is None:
-            return 'Neutral'
-        best_match = 'Neutral'
-        max_similarity = -2.0  # Start below the possible range of cosine similarity
+        if query_hv is None: return 'Neutral'
+        best_match = 'Neutral'; max_similarity = -2.0
         for mood, mood_hv in self.hdc.mood_vocabulary.items():
             sim = self.hdc._cosine_similarity(query_hv, mood_hv)
             if sim > max_similarity:
-                max_similarity = sim
-                best_match = mood
+                max_similarity = sim; best_match = mood
         return best_match.capitalize()
 
     def get_current_mood(self, character_name):
-        """Gets the mood of the most recent emotional event."""
         char_name = character_name.lower()
         if char_name not in self.hdc.character_states or not self.hdc.character_states[char_name]['recent_mood_impacts']:
             return 'Neutral'
-        
-        # The last vector in the deque is the most recent impact
         last_impact_hv = self.hdc.character_states[char_name]['recent_mood_impacts'][-1]
         return self._find_best_match(last_impact_hv)
 
     def get_dominant_mood(self, character_name):
-        """
-        Calculates the overall mood by bundling the recent history of impacts.
-        This represents the character's underlying disposition.
-        """
         char_name = character_name.lower()
         if char_name not in self.hdc.character_states or not self.hdc.character_states[char_name]['recent_mood_impacts']:
             return 'Neutral'
-
         mood_history = self.hdc.character_states[char_name]['recent_mood_impacts']
-        if not mood_history:
-            return 'Neutral'
-
-        # Bundle all recent mood impacts into a composite vector
+        if not mood_history: return 'Neutral'
         composite_mood_hv = self.hdc._bundle(list(mood_history))
         return self._find_best_match(composite_mood_hv)
 
@@ -168,9 +130,38 @@ class OnboardingAgent:
             fact = fact.strip()
             if not fact: continue
             system_statement = f"System learns a fact: {fact}"
-            # The observer now returns a dictionary
             parsed_fact = self.observer.parse_message(system_statement)
             if parsed_fact and parsed_fact.get('dsl'):
                 event_info = {'description': fact, 'dsl': parsed_fact['dsl'], 'meta': {'source': 'character_card'}}
                 self.hdc.process_dsl_event(event_info)
         print(f"-> {char_name}'s core memories have been seeded.")
+
+# --- The New Orchestrator Agent ---
+class OrchestratorAgent:
+    def __init__(self, api_key):
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = "gemini-2.0-flash-lite"
+        self.system_instruction = ORCHESTRATOR_AGENT_PROMPT
+
+    def create_query_plan(self, conversation_history):
+        print_header("Orchestrator Agent is creating a query plan...")
+        print(f">> Orchestrator analyzing:\n{conversation_history}")
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[conversation_history],
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_instruction,
+                    response_mime_type="application/json",
+                    max_output_tokens=500,
+                    temperature=0.2
+                )
+            )
+            plan = json.loads(response.text)
+            print(">> Orchestrator plan received:")
+            print(json.dumps(plan, indent=2))
+            return plan
+        except (Exception, json.JSONDecodeError) as e:
+            print(f"!! Orchestrator Agent failed to create a valid plan: {e}")
+            return None
